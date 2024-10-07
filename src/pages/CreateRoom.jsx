@@ -21,7 +21,10 @@ function CreateRoom() {
       // 방 생성후 caller로 입장하여 RoomPage로 이동, isCaller 플래그 전달
       // callee는 createRoom을 거쳐서 오는게 아니라 바로 링크로 타고 들어오므로
       // isCaller를 true로 가지고 들어올 수 없음.
-      navigate(roomUrl, { state: { isCaller: true } });
+      console.log(response.data.result);
+      navigate(`/room/${response.data.result}`, {
+        state: { isCaller: true, email },
+      });
     } catch (error) {
       console.error('방 생성중 오류 발생', error);
     }
