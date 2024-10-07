@@ -10,6 +10,7 @@ function RoomPage() {
   const [isCaller, setIsCaller] = useState(false); // caller인지 여부 플래그
   const [message, setMessage] = useState('');
   const [roomLink, setRoomLink] = useState(''); // 방 링크 상태
+  const [emailEntered, setEmailEntered] = useState(false); // 이메일 입력 완료 여부
 
   const navigate = useNavigate();
   const location = useLocation(); // 현재 위치에서 state 확인용
@@ -29,6 +30,13 @@ function RoomPage() {
     const link = `http://localhost:3000/room/${roomId}`;
     setRoomLink(link); // Caller일 경우 방 링크 저장
   });
+
+  // 이메일 입력 후 '입력 완료' 누르면 실행
+  const handleEmailSubmit = () => {
+    if (email.trim()) {
+      setEmailEntered(true); // 이메일이 입력 완료되었음을 설정
+    }
+  };
 
   // Caller가 Offer SDP를 생성하고 전송
   const createOffer = async () => {
@@ -105,8 +113,6 @@ function RoomPage() {
   // 방에 입장하고 Socket.IO 초기화
   const handleJoinRoom = async () => {
     try {
-      // FIXME : 여기서 지금 500에러 터짐, get이니 어쩌니하면서 난리중
-      // FIXED : 템플릿 문자열 백틱좀쓰셈
       const response = await axios.post(
         `http://localhost:8080/api/rooms/room/join`,
         { roomId, email },
@@ -143,10 +149,11 @@ function RoomPage() {
   return (
     <div>
       <h2>Room ID: {roomId}</h2>
+      <h3>{isCaller ? '당신은 Caller입니다.' : '당신은 Callee입니다.'}</h3>
       {!inCall ? (
         <>
-          {/* 이메일이 없을 때만 이메일 입력란을 보여줌 */}
-          {!email && (
+          {/* 이메일 입력란과 버튼을 조건부로 렌더링 */}
+          {!emailEntered ? (
             <>
               <input
                 type="email"
@@ -154,12 +161,13 @@ function RoomPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
               />
+              <button onClick={handleEmailSubmit} disabled={!email}>
+                입력 완료
+              </button>
             </>
+          ) : (
+            <button onClick={handleJoinRoom}>입장하기</button>
           )}
-          <button onClick={handleJoinRoom} disabled={!email}>
-            입장하기
-          </button>{' '}
-          {/* 이메일이 없으면 버튼 비활성화 */}
         </>
       ) : (
         <>
@@ -169,7 +177,7 @@ function RoomPage() {
         </>
       )}
 
-      {/* Caller일 경우 방 링크 표시 및 복사 기능 추가 */}
+      {/* Caller일 경우 방 링크 표시 */}
       {isCaller && roomLink && (
         <div>
           <h3>방 링크:</h3>
