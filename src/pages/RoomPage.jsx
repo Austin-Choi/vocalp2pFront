@@ -11,6 +11,7 @@ function RoomPage() {
   const [message, setMessage] = useState('');
   const [roomLink, setRoomLink] = useState(''); // 방 링크 상태
   const [emailEntered, setEmailEntered] = useState(false); // 이메일 입력 완료 여부
+  //   const [isEndingCall, setIsEndingCall] = useState(false); // 통화 종료 실행 플래그
 
   const navigate = useNavigate();
   const location = useLocation(); // 현재 위치에서 state 확인용
@@ -20,6 +21,11 @@ function RoomPage() {
   const localStream = useRef(null); // local audio stream
   const remoteStream = useRef(null); // opponent audio stream
 
+  const isInitialLoad = useRef(true); // 초기 로드 상태를 저장하는 플래그
+
+  // FIXME : 왜 렌더링할때마다 cleanup 해버리는거죠? 분명 return에 넣었는데..
+  // 시스템상 어쩔수 없으면 대체 뭘 수정해야 이후
+  // 해당 객체를 쓸때 null에 참조하지 못하게 할 수 있을까요..
   useEffect(() => {
     // caller 여부를 확인하여 상태 플래그 설정
     if (location.state) {
@@ -30,20 +36,32 @@ function RoomPage() {
     const link = `http://localhost:3000/room/${roomId}`;
     setRoomLink(link); // Caller일 경우 방 링크 저장
 
-    // cleanup : unmount시 socket 연결 해제
+    isInitialLoad.current = false;
+
     return () => {
-      handleCleanup();
+      if (socket.current || peerConnection.current) {
+        handleCleanup(); // 객체가 존재할 때만 cleanup 실행
+      }
     };
-  });
+  }, []);
 
   // webRTC 연결 해제
   const handleCleanup = () => {
+    console.log('handleCleanup 호출됨. 상태 확인:', {
+      socket: socket.current,
+      peerConnection: peerConnection.current,
+    });
+
     // webRTC 연결 해제
     if (peerConnection.current) {
+      // Local 트랙 해제
       localStream.current?.getTracks().forEach(track => track.stop());
+      // Remote 트랙 해제
       remoteStream.current?.srcObject
         ?.getTracks()
         .forEach(track => track.stop());
+
+      // peerConnection 닫기
       peerConnection.current.close();
       peerConnection.current = null;
     }
@@ -94,9 +112,19 @@ function RoomPage() {
 
   // 통화 종료 핸들러
   const handleEndCall = () => {
-    socket.current.emit('leave', { roomId });
-    // 서버로 disconnect-call 전송
-    socket.current.emit('disconnect-call', { roomId });
+    // 이미 종료 중이면 함수 실행 X
+    if (!socket.current && !peerConnection.current) {
+      console.warn('이미 종료된 상태입니다. 중복 종료 방지');
+      return;
+    }
+
+    // setIsEndingCall(true);
+
+    if (socket.current) {
+      socket.current.emit('leave', { roomId });
+      // 서버로 disconnect-call 전송
+      socket.current.emit('disconnect-call', { roomId });
+    }
 
     // 사용자에게 종료 알림
     alert('통화가 종료되었습니다. 3초 후 메인 페이지로 돌아갑니다.');
@@ -129,11 +157,15 @@ function RoomPage() {
 
     // ICE candidate 수신시 처리
     peerConnection.current.onicecandidate = event => {
-      if (event.candidate) {
+      if (event.candidate && socket.current) {
         socket.current.emit('ice-candidate', {
           candidate: event.candidate,
           roomId,
         });
+      } else {
+        console.warn(
+          'ICE candidate를 전송할 수 없습니다. socket이 해제되었습니다.'
+        );
       }
     };
 
@@ -155,20 +187,41 @@ function RoomPage() {
           },
         }
       );
-      setMessage(response.data.result);
+      // response와 response.data가 존재하는지 체크
+      if (response && response.data) {
+        setMessage(response.data.result);
+      } else {
+        setMessage('방 입장에 실패했습니다: 올바르지 않은 응답입니다.');
+      }
+
       setInCall(true);
 
-      // 1. Socket.IO 초기화 및 이벤트 리스너 등록
-      // SDP, ICE 후보를 교환하기 위해 Signaling Server 연결
       socket.current = io('http://localhost:9092'); // 시그널링 서버 연결
-      socket.current.emit('join', { roomId, email });
+      socket.current.on('connect', () => {
+        console.log('Socket.IO 연결 성공');
+        // 1. Socket 연결 후 WebRTC 초기화
+        // SDP, ICE 후보를 교환하기 위해 Signaling Server 연결
+        initWebRTC();
+      });
 
+      // 연결이 끊어졌을 때 로그 출력 및 상태 초기화
+      socket.current.on('disconnect', () => {
+        console.log('Socket.IO 연결이 끊어졌습니다.');
+        socket.current = null; // 연결이 끊어졌을 때 socket 객체를 초기화
+      });
+
+      // Socket이 제대로 초기화되었는지 확인 후 join 이벤트 전송
+      if (socket.current) {
+        socket.current.emit('join', { roomId, email });
+      } else {
+        console.error('Socket이 초기화되지 않았습니다.');
+      }
+
+      // 2. Socket 이벤트 리스너 등록
       socket.current.on('offer', handleReceiveOffer);
       socket.current.on('answer', handleReceiveAnswer);
       socket.current.on('ice-candidate', handleNewIceCandidate);
 
-      // 2. RTCPeerConnection 초기화
-      // : 로컬 미디어 스트림을 설정하고, ICE 후보를 수집하는 역할
       await initWebRTC();
 
       // 3. CreateOffer 호출해서 Offer SDP 생성 및 전송
@@ -176,7 +229,22 @@ function RoomPage() {
         await createOffer();
       }
     } catch (error) {
-      setMessage('방 입장에 실패했습니다: ' + error.response.data.result);
+      if (error.response) {
+        // 서버가 응답했지만 4xx, 5xx 에러일 경우
+        setMessage(
+          '방 입장에 실패했습니다: ' +
+            (error.response.data?.result || error.response.statusText)
+        );
+        console.error('API 요청 실패 (서버 에러):', error.response);
+      } else if (error.request) {
+        // 요청이 전송되었지만 응답이 없을 경우
+        setMessage('방 입장에 실패했습니다: 서버에서 응답이 없습니다.');
+        console.error('API 요청 실패 (요청 전송됨, 응답 없음):', error.request);
+      } else {
+        // 그 외의 요청 설정 오류 등
+        setMessage('방 입장에 실패했습니다: ' + error.message);
+        console.error('API 요청 설정 오류:', error.message);
+      }
     }
   };
   return (
