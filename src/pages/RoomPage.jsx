@@ -29,6 +29,22 @@ function RoomPage() {
     // 방 링크 설정
     const link = `http://localhost:3000/room/${roomId}`;
     setRoomLink(link); // Caller일 경우 방 링크 저장
+
+    socket.current.on('peer-disconnected', () => {
+      alert('상대방이 통화를 종료했습니다.');
+      // webRTC 연결 해제
+      peerConnection.current.close();
+
+      // 2초 후 루트 페이지로 이동
+      setTimeout(() => {
+        navigate('/');
+      }, 2000);
+    });
+
+    // cleanup : unmount시 socket 연결 해제
+    return () => {
+      socket.current.disconnect();
+    };
   });
 
   // 이메일 입력 후 '입력 완료' 누르면 실행
@@ -72,6 +88,8 @@ function RoomPage() {
   // 통화 종료 핸들러
   const handleEndCall = () => {
     socket.current.emit('leave', { roomId });
+    // 서버로 disconnect-call 전송
+    socket.current.emit('disconnect-call', { roomId });
     peerConnection.current.close();
     setInCall(false);
     navigate('/');
