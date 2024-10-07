@@ -7,4 +7,5 @@ export default defineConfig({
   server: {
     port: 3000, // 로컬 개발서버 포트 3000
   },
+  historyApiFallback: true, // 페이지 새로고침 시 404 방지
 });
