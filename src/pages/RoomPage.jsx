@@ -30,22 +30,29 @@ function RoomPage() {
     const link = `http://localhost:3000/room/${roomId}`;
     setRoomLink(link); // Caller일 경우 방 링크 저장
 
-    socket.current.on('peer-disconnected', () => {
-      alert('상대방이 통화를 종료했습니다.');
-      // webRTC 연결 해제
-      peerConnection.current.close();
-
-      // 2초 후 루트 페이지로 이동
-      setTimeout(() => {
-        navigate('/');
-      }, 2000);
-    });
-
     // cleanup : unmount시 socket 연결 해제
     return () => {
-      socket.current.disconnect();
+      handleCleanup();
     };
   });
+
+  // webRTC 연결 해제
+  const handleCleanup = () => {
+    // webRTC 연결 해제
+    if (peerConnection.current) {
+      localStream.current?.getTracks().forEach(track => track.stop());
+      remoteStream.current?.srcObject
+        ?.getTracks()
+        .forEach(track => track.stop());
+      peerConnection.current.close();
+      peerConnection.current = null;
+    }
+    // Socket.IO 연결 해제
+    if (socket.current) {
+      socket.current.disconnect();
+      socket.current = null;
+    }
+  };
 
   // 이메일 입력 후 '입력 완료' 누르면 실행
   const handleEmailSubmit = () => {
@@ -90,9 +97,17 @@ function RoomPage() {
     socket.current.emit('leave', { roomId });
     // 서버로 disconnect-call 전송
     socket.current.emit('disconnect-call', { roomId });
-    peerConnection.current.close();
+
+    // 사용자에게 종료 알림
+    alert('통화가 종료되었습니다. 3초 후 메인 페이지로 돌아갑니다.');
+
+    // webRTC와 Socket.IO 모두 정리
+    handleCleanup();
     setInCall(false);
-    navigate('/');
+
+    setTimeout(() => {
+      navigate('/');
+    }, 3000);
   };
 
   // WebRTC 연결 초기화
@@ -170,7 +185,6 @@ function RoomPage() {
       <h3>{isCaller ? '당신은 Caller입니다.' : '당신은 Callee입니다.'}</h3>
       {!inCall ? (
         <>
-          {/* 이메일 입력란과 버튼을 조건부로 렌더링 */}
           {!emailEntered ? (
             <>
               <input
@@ -195,7 +209,6 @@ function RoomPage() {
         </>
       )}
 
-      {/* Caller일 경우 방 링크 표시 */}
       {isCaller && roomLink && (
         <div>
           <h3>방 링크:</h3>
