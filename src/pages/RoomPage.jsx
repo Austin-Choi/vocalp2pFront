@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import axios from 'axios';
 
@@ -9,7 +9,10 @@ function RoomPage() {
   const [inCall, setInCall] = useState(false); // 현재 통화중인지 여부
   const [isCaller, setIsCaller] = useState(false); // caller인지 여부 플래그
   const [message, setMessage] = useState('');
+  const [roomLink, setRoomLink] = useState(''); // 방 링크 상태
+
   const navigate = useNavigate();
+  const location = useLocation(); // 현재 위치에서 state 확인용
 
   const socket = useRef(null); // Socket.IO client
   const peerConnection = useRef(null); // WebRTC PeerConnection Object
@@ -18,10 +21,14 @@ function RoomPage() {
 
   useEffect(() => {
     // caller 여부를 확인하여 상태 플래그 설정
-    if (location.state && location.state.isCaller) {
-      setIsCaller(true);
+    if (location.state) {
+      setIsCaller(location.state.isCaller);
+      setEmail(location.state.email || ''); // 전달된 이메일 설정
     }
-  }, []);
+    // 방 링크 설정
+    const link = `http://localhost:3000/room/${roomId}`;
+    setRoomLink(link); // Caller일 경우 방 링크 저장
+  });
 
   // Caller가 Offer SDP를 생성하고 전송
   const createOffer = async () => {
@@ -98,10 +105,16 @@ function RoomPage() {
   // 방에 입장하고 Socket.IO 초기화
   const handleJoinRoom = async () => {
     try {
+      // FIXME : 여기서 지금 500에러 터짐, get이니 어쩌니하면서 난리중
+      // FIXED : 템플릿 문자열 백틱좀쓰셈
       const response = await axios.post(
-        'http://localhost:8080/api/rooms/room/${roomId}',
-        null,
-        { params: { email } }
+        `http://localhost:8080/api/rooms/room/join`,
+        { roomId, email },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
       );
       setMessage(response.data.result);
       setInCall(true);
@@ -129,26 +142,41 @@ function RoomPage() {
   };
   return (
     <div>
-      <h2>Room ID : {roomId}</h2>
+      <h2>Room ID: {roomId}</h2>
       {!inCall ? (
         <>
-          <input
-            type="email"
-            placeholder="이메일 입력"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-          />
-          <button type="button" onClick={handleJoinRoom}>
-            통화 시작
-          </button>
+          {/* 이메일이 없을 때만 이메일 입력란을 보여줌 */}
+          {!email && (
+            <>
+              <input
+                type="email"
+                placeholder="이메일 입력"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+              />
+            </>
+          )}
+          <button onClick={handleJoinRoom} disabled={!email}>
+            입장하기
+          </button>{' '}
+          {/* 이메일이 없으면 버튼 비활성화 */}
         </>
       ) : (
         <>
-          <h3>통화중</h3>
+          <h3>통화 중...</h3>
           <audio ref={remoteStream} autoPlay />
           <button onClick={handleEndCall}>통화 종료</button>
         </>
       )}
+
+      {/* Caller일 경우 방 링크 표시 및 복사 기능 추가 */}
+      {isCaller && roomLink && (
+        <div>
+          <h3>방 링크:</h3>
+          <p>{roomLink}</p>
+        </div>
+      )}
+
       {message && <p>{message}</p>}
     </div>
   );
